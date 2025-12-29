@@ -236,3 +236,15 @@ Feel free to submit issues, fork the repository, and create pull requests for an
 
 **Made with ❤️ for developers who want to write better code**
 
+## Continuous Deployment with GitHub Actions -> Render
+
+A GitHub Actions workflow has been included to trigger a Render deploy when you push to `main`.
+
+Setup steps:
+1. In your GitHub repo, go to Settings -> Secrets -> Actions and add two secrets:
+  - `RENDER_API_KEY` — your Render API key (create in Render dashboard -> Account -> API Keys)
+  - `RENDER_SERVICE_ID` — the Render service ID for your web service (found in Render dashboard -> Service -> Settings -> Service ID)
+2. The workflow file `.github/workflows/render-deploy.yml` will POST to the Render API to start a deploy on each push to `main`.
+
+This allows an automated public deploy flow: push -> GitHub Actions -> Render -> public URL.
+
