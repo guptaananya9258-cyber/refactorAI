@@ -1,10 +1,9 @@
 services:
   - type: web
     name: refactoriq
-    env: python
+    env: docker
     plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 4"
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: OPENAI_API_KEY
-        value: "" # set on Render dashboard to enable AI-powered fixes
+        value: ""
