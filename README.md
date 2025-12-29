@@ -1,5 +1,87 @@
 # RefactorIQ
 
+RefactorIQ is a beginner-friendly AI-assisted static analysis web app for Python. It uses a Flask backend to analyze Python code via the AST module and a small frontend (HTML/CSS/JS) to paste code and view issues and a quality score.
+
+Quick start
+
+1. Create and activate a virtual environment (recommended):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Run the app:
+
+```bash
+python app.py
+```
+
+4. Open http://localhost:5000 in your browser and paste Python code to analyze.
+
+What it detects
+
+- Long functions
+- Unused variables
+- Deep nesting
+- Logical and best-practice hints
+
+API
+
+- `POST /api/refactor` — main production endpoint.
+  - Payload JSON: `{ "code": "...", "language": "python" }` or `{ "problem": "..." }`
+  - Returns JSON with: `error_explanation`, `fixed_code`, `comments`, `intent`, `notes`, `success`.
+
+Deployment (Render)
+
+1. Create a new Web Service on Render and connect your GitHub repo.
+2. Set the build command to:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Set the start command to:
+
+```bash
+gunicorn app:app --bind 0.0.0.0:$PORT --workers 4
+```
+
+4. Add an environment variable `OPENAI_API_KEY` in the Render dashboard to enable AI-powered fixes (optional).
+
+Deployment (Docker)
+
+You can also deploy using the provided `Dockerfile`:
+
+```bash
+docker build -t refactoriq .
+docker run -p 5000:5000 -e OPENAI_API_KEY="your_key" refactoriq
+```
+
+Notes
+
+- For production, set `DEBUG=False` and provide `OPENAI_API_KEY` if you want the app to generate corrected code and rich explanations using the OpenAI API. The app will fall back to static AST analysis and `autopep8` formatting if the key is not provided.
+- Keep your API key secret — set it in the hosting provider's environment variables.
+
+Project structure
+
+- `app.py` — Flask backend and AST analyzer
+- `templates/index.html` — Frontend UI
+- `static/style.css` — Dark theme styles
+- `static/app.js` — Frontend logic to call backend
+- `requirements.txt` — Python dependencies
+
+Notes
+
+- Keep this simple and hackathon-ready. The analyzer is static and conservative — use results as guidance.
+# RefactorIQ
+
 **AI-Assisted Code Refactoring Tool for Python**
 
 RefactorIQ is a beginner-friendly web application that helps you improve your Python code quality by analyzing your code and providing actionable refactoring suggestions.

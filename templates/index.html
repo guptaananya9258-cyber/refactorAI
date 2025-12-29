@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RefactorIQ</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>RefactorIQ</h1>
+      <p class="tagline">AI-assisted static analysis for beginner-friendly Python refactoring.</p>
+    </header>
+
+    <section class="editor">
+      <label for="codeInput" class="label">Paste your Python code</label>
+      <textarea id="codeInput" placeholder="Paste Python code here..." spellcheck="false"></textarea>
+      <div class="controls">
+        <button id="analyzeBtn" class="btn">Analyze Code</button>
+        <span id="status" class="status">Ready</span>
+      </div>
+    </section>
+
+    <section class="results">
+      <div class="score">
+        <strong>Quality Score:</strong>
+        <div id="scoreValue" class="scoreValue">—</div>
+        <div class="scoreBar"><div id="scoreBarFill" class="scoreBarFill" style="width:0%"></div></div>
+      </div>
+
+      <div class="issues">
+        <h2>Issues</h2>
+        <div id="issuesList" class="issuesList">No analysis yet.</div>
+      </div>
+
+      <div class="suggestions">
+        <h2>Suggestions</h2>
+        <div id="suggestionsList">—</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

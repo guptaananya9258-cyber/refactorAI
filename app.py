@@ -7,6 +7,19 @@ from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import ast
 import json
+import os
+
+# Optional AI integration
+try:
+    import openai
+except Exception:
+    openai = None
+
+# Code formatter for fallback fixes
+try:
+    import autopep8
+except Exception:
+    autopep8 = None
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend-backend communication
@@ -29,7 +42,6 @@ def check_syntax_errors(code):
     try:
         # Try to compile the code to catch syntax errors
         compile(code, '<string>', 'exec')
-        # Try to parse with AST to catch more detailed errors
         ast.parse(code)
         return True, None
     except SyntaxError as e:
@@ -249,7 +261,8 @@ def analyze_code_with_ast(code):
         tree = ast.parse(code)
         
         # Track variables for unused variable detection
-        defined_vars = set()
+        # Map variable name -> set of line numbers where it is defined
+        defined_vars = {}
         used_vars = set()
         
         # Check for logical errors
@@ -299,13 +312,18 @@ def analyze_code_with_ast(code):
                 
                 # Track function parameters as defined variables
                 for arg in node.args.args:
-                    defined_vars.add(arg.arg)
+                    defined_vars.setdefault(arg.arg, set()).add(node.lineno)
             
-            # Detect variable assignments
+            # Detect variable assignments and remember definition line
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
-                        defined_vars.add(target.id)
+                        defined_vars.setdefault(target.id, set()).add(getattr(target, 'lineno', node.lineno))
+                    elif isinstance(target, ast.Tuple):
+                        # e.g. a, b = ...
+                        for elt in target.elts:
+                            if isinstance(elt, ast.Name):
+                                defined_vars.setdefault(elt.id, set()).add(getattr(elt, 'lineno', node.lineno))
             
             # Detect variable usage
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
@@ -327,21 +345,22 @@ def analyze_code_with_ast(code):
                         'description': 'Simplify nested code by returning early when possible or creating helper functions.'
                     })
         
-        # Check for unused variables
-        unused_vars = defined_vars - used_vars
-        for var in unused_vars:
-            # Skip common patterns like loop variables and special names
-            if not var.startswith('_') and var not in ['self', 'cls', 'args', 'kwargs']:
+        # Check for unused variables (use line info captured when possible)
+        for var, def_lines in defined_vars.items():
+            if var in ('self', 'cls', 'args', 'kwargs') or var.startswith('_'):
+                continue
+            if var not in used_vars:
+                lineno = min(def_lines) if def_lines else 0
                 issues.append({
                     'type': 'Unused Variable',
                     'severity': 'info',
                     'message': f"Variable '{var}' is created but never used in your code.\nRemove it to keep your code clean and easy to read.",
-                    'line': 0,
+                    'line': lineno,
                     'suggestion': f"Delete the variable '{var}' if you don't need it, or use it somewhere in your code."
                 })
                 suggestions.append({
                     'type': 'Remove Unused Code',
-                    'description': f"Remove unused variables to make your code cleaner and easier to understand."
+                    'description': f"Remove unused variable '{var}' to make your code cleaner."
                 })
         
         # Calculate code quality score (0-100)
@@ -391,31 +410,39 @@ def get_nesting_depth(node, depth=0):
 
 def calculate_quality_score(issues, total_lines):
     """
-    Calculate code quality score based on issues found.
-    
+    Calculate a simple heuristic quality score (0-100).
+
+    Scoring strategy:
+    - Start from 100
+    - Subtract points for errors/warnings/info
+    - Penalize for very long files to encourage smaller modules
+
     Args:
-        issues: List of issues found
-        total_lines: Total lines of code
-        
+        issues: list of issue dicts
+        total_lines: number of lines in submitted code
+
     Returns:
-        int: Quality score (0-100)
+        int: score 0-100
     """
     base_score = 100
-    
+
     # Deduct points based on issue severity
     for issue in issues:
-        if issue['severity'] == 'error':
-            base_score -= 10
-        elif issue['severity'] == 'warning':
-            base_score -= 5
-        elif issue['severity'] == 'info':
+        sev = (issue.get('severity') or 'info').lower()
+        if sev == 'error':
+            base_score -= 12
+        elif sev == 'warning':
+            base_score -= 6
+        else:
             base_score -= 2
-    
-    # Bonus for clean code (no issues)
-    if len(issues) == 0:
-        base_score = 100
-    
-    # Ensure score is between 0 and 100
+
+    # Penalize very long files mildly
+    if total_lines > 300:
+        base_score -= min(20, (total_lines - 300) // 10)
+    elif total_lines > 100:
+        base_score -= min(10, (total_lines - 100) // 10)
+
+    # Clamp
     return max(0, min(100, base_score))
 
 
@@ -465,6 +492,157 @@ def analyze():
             'success': False,
             'error': f'Server error: {str(e)}'
         }), 500
+
+
+def detect_intent(code_text: str) -> str:
+    """
+    Heuristic intent detection: returns one of DSA / OOP / Control Flow / Utility
+    """
+    s = code_text.lower()
+    if 'class ' in s or 'self' in s or 'def __init__' in s:
+        return 'OOP'
+    algo_keywords = ['sort', 'binary', 'search', 'dijkstra', 'bst', 'dfs', 'bfs', 'merge', 'quick', 'heap']
+    if any(k in s for k in algo_keywords):
+        return 'DSA'
+    if any(k in s for k in ['if ', 'for ', 'while ', 'return ']):
+        return 'Control Flow'
+    return 'Utility / Script'
+
+
+def call_openai_for_refactor(prompt: str, model: str | None = None, max_tokens: int = 1200) -> dict:
+    """
+    Call OpenAI ChatCompletion to get a structured JSON result.
+    Returns parsed JSON on success, raises on failure.
+    """
+    if openai is None:
+        raise RuntimeError('OpenAI library not installed')
+    api_key = os.environ.get('OPENAI_API_KEY')
+    if not api_key:
+        raise RuntimeError('OPENAI_API_KEY not set')
+    openai.api_key = api_key
+    model = model or os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
+
+    system = (
+        "You are a professional code reviewer and refactoring assistant. "
+        "When given source code or a problem, respond with a JSON object containing keys: "
+        "'error_explanation', 'fixed_code', 'comments', 'intent', 'notes'. "
+        "Do not include extra text outside the JSON. Keep code in the 'fixed_code' value."
+    )
+
+    # Use chat completion if available
+    try:
+        resp = openai.ChatCompletion.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=max_tokens,
+            temperature=0.2,
+        )
+        text = resp['choices'][0]['message']['content']
+        # Try to parse JSON from the model's output
+        try:
+            return json.loads(text)
+        except Exception:
+            # If model didn't return pure JSON, attempt to extract JSON substring
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1:
+                try:
+                    return json.loads(text[start:end+1])
+                except Exception as e:
+                    raise RuntimeError(f'Failed to parse model output as JSON: {e}\nRaw output:\n{text}')
+            raise RuntimeError('Model output is not JSON')
+    except Exception as e:
+        raise
+
+
+@app.route('/api/refactor', methods=['POST'])
+def api_refactor():
+    """
+    Production-ready refactor endpoint.
+
+    Accepts JSON:
+      - code: source code string (preferred)
+      - problem: natural language problem description
+
+    Returns JSON with:
+      - error_explanation
+      - fixed_code
+      - comments (list)
+      - intent
+      - notes
+    """
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({'success': False, 'error': 'Invalid JSON'}), 400
+
+    if not data:
+        return jsonify({'success': False, 'error': 'No payload provided'}), 400
+
+    code = data.get('code')
+    problem = data.get('problem')
+    lang = (data.get('language') or 'python').lower()
+
+    if not code and not problem:
+        return jsonify({'success': False, 'error': 'Provide either `code` or `problem` in the JSON payload.'}), 400
+
+    # Build prompt for AI if available
+    prompt_text = ''
+    if problem and not code:
+        prompt_text = f"Solve and provide a production-ready, well-documented Python solution for the following problem:\n\n{problem}\n\nFollow these deliverables: error explanation, fixed code, and clean comments. Output JSON only."
+    else:
+        prompt_text = f"Analyze and fix the following Python source. Explain errors (syntax, logical, design), detect intent, and return corrected optimized code with compiler-style and mentor-style comments. Output JSON with keys: error_explanation, fixed_code, comments, intent, notes.\n\nSOURCE:\n{code}"
+
+    # Attempt AI-powered path if API key is set
+    if os.environ.get('OPENAI_API_KEY') and openai is not None:
+        try:
+            model_resp = call_openai_for_refactor(prompt_text)
+            model_resp['success'] = True
+            return jsonify(model_resp)
+        except Exception as e:
+            # Log and fallback
+            print('OpenAI call failed:', e)
+
+    # Fallback (no API key or AI failed): local static analysis + formatting
+    result = {
+        'success': True,
+        'intent': detect_intent(code or problem or ''),
+        'error_explanation': None,
+        'fixed_code': None,
+        'comments': [],
+        'notes': 'Fallback local analysis. To enable AI-powered fixes set OPENAI_API_KEY.'
+    }
+
+    # If language is Python, run local analysis
+    if lang == 'python' and code:
+        is_valid, syntax_err = check_syntax_errors(code)
+        if not is_valid:
+            result['error_explanation'] = syntax_err
+        analysis = analyze_code_with_ast(code)
+        # Compose comments from issues
+        comments = []
+        for it in analysis.get('issues', []):
+            comments.append({'line': it.get('line'), 'type': it.get('type'), 'severity': it.get('severity'), 'msg': it.get('message'), 'suggestion': it.get('suggestion')})
+        result['comments'] = comments
+        result['notes'] = analysis.get('suggestions') or []
+        # Try to produce a minimally fixed code using autopep8
+        if autopep8 is not None:
+            try:
+                fixed = autopep8.fix_code(code)
+            except Exception:
+                fixed = code
+        else:
+            fixed = code
+
+        result['fixed_code'] = fixed
+        result['score'] = analysis.get('score')
+        return jsonify(result)
+
+    # Language not supported in fallback
+    return jsonify({'success': False, 'error': f'Language {lang} not supported for local fallback and no AI key available.'}), 400
 
 
 if __name__ == '__main__':
