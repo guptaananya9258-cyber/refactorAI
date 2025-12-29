@@ -6,6 +6,18 @@ function App(){
   const [problem, setProblem] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const [copyStatus, setCopyStatus] = useState('')
+
+  const demoExample = `# Example: Two-sum (DSA)
+def two_sum(nums, target):
+    for i in range(len(nums)):
+        for j in range(i+1, len(nums)):
+            if nums[i] + nums[j] == target:
+                return [i, j]
+    return None
+
+# Problem: Find indices of two numbers that add up to target
+`;
 
   async function analyze(){
     setLoading(true)
@@ -36,7 +48,8 @@ function App(){
           <textarea value={code} onChange={e=>setCode(e.target.value)} className="w-full p-3 border rounded font-mono h-56" />
           <div className="flex gap-2 mt-3">
             <button className="btn" onClick={analyze} disabled={loading}>{loading? 'Analyzing...' : 'Analyze'}</button>
-            <button className="px-4 py-2 border rounded" onClick={()=>{setCode(''); setProblem(''); setResult(null)}}>Reset</button>
+            <button className="px-4 py-2 border rounded" onClick={()=>{setCode(''); setProblem(''); setResult(null); setCopyStatus('')}}>Reset</button>
+            <button className="px-4 py-2 border rounded" onClick={()=>{setCode(demoExample); setProblem('Demo: implement Two-sum (find indices)'); setResult(null)}}>Load Example</button>
           </div>
         </div>
 
@@ -63,8 +76,18 @@ function App(){
                 <pre className="text-sm bg-green-50 p-2 rounded text-green-800">{result.fixed_code || result.raw || '—'}</pre>
               ) : <div className="text-gray-500">—</div>}
             </div>
-            <div className="flex gap-2 mt-3">
-              <button className="px-3 py-1 bg-green-600 text-white rounded" onClick={()=>{navigator.clipboard.writeText(result?.fixed_code || '')}}>Copy Code</button>
+            <div className="flex gap-2 mt-3 items-center">
+              <button
+                className="px-3 py-1 bg-green-600 text-white rounded"
+                onClick={async ()=>{
+                  const text = result?.fixed_code || result?.raw || '';
+                  if(!text) return;
+                  await navigator.clipboard.writeText(text);
+                  setCopyStatus('Copied!');
+                  setTimeout(()=>setCopyStatus(''),2000);
+                }}
+              >Copy Code</button>
+              <span className="text-sm text-green-700">{copyStatus}</span>
             </div>
           </div>
 
